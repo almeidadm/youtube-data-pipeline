@@ -1,6 +1,6 @@
-# Guia de uso
+# Usage Guide
 
-## Integração em Jupyter Notebook
+## Jupyter Notebook integration
 
 ```python
 from youtube_data_pipeline import YouTubeDataClient, YouTubeDataConfig
@@ -12,7 +12,7 @@ search_data = client.fetch(
     "search",
     {
         "part": "snippet",
-        "q": "investimentos portugal brasil",
+        "q": "investments portugal brazil",
         "type": "video",
         "maxResults": 25,
     },
@@ -28,7 +28,7 @@ videos_data = client.fetch(
 )
 ```
 
-## Execução recorrente
+## Recurring execution
 
 ```python
 from youtube_data_pipeline import RecurringCollector
@@ -46,11 +46,11 @@ def job():
 runner.run(job, iterations=24)
 ```
 
-## Logs e créditos
+## Logs and credits
 
-Cada chamada gera log estruturado com:
+Each call generates a structured log with:
 
 - endpoint;
-- custo estimado da chamada;
-- total acumulado de créditos na sessão;
-- arquivo de saída salvo.
+- estimated call cost;
+- cumulative session credits;
+- saved output file.

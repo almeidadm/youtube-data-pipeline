@@ -1,40 +1,40 @@
 # Design Doc — youtube-data-pipeline
 
-## Visão geral
+## Overview
 
-A biblioteca fornece uma camada leve para coleta da YouTube Data API v3 com foco em:
+The library provides a lightweight layer for collecting from the YouTube Data API v3 with a focus on:
 
-- simplicidade para notebooks;
-- extensibilidade para novos endpoints;
-- observabilidade de créditos;
-- persistência padronizada de respostas;
-- suporte a execução recorrente.
+- simplicity for notebooks;
+- extensibility for new endpoints;
+- credit observability;
+- standardized response persistence;
+- support for recurring execution.
 
-## Decisões de design
+## Design decisions
 
-### 1) Registro declarativo de endpoints
+### 1) Declarative endpoint registry
 
-Cada endpoint é definido por:
+Each endpoint is defined by:
 
-- `resource` e `method` da `google-api-python-client`;
-- custo-base de crédito;
-- parâmetros obrigatórios/opcionais.
+- `resource` and `method` from `google-api-python-client`;
+- base credit cost;
+- required/optional parameters.
 
-Isso reduz acoplamento e permite adicionar novos endpoints sem alterar o núcleo do cliente.
+This reduces coupling and allows adding new endpoints without changing the client core.
 
-### 2) Cliente único para coleta (`YouTubeDataClient`)
+### 2) Single client for collection (`YouTubeDataClient`)
 
-Fluxo:
+Flow:
 
-1. valida endpoint e parâmetros;
-2. executa requisição;
-3. salva resposta em disco;
-4. contabiliza e registra custo de crédito;
-5. avança paginação (quando houver `nextPageToken`).
+1. validates endpoint and parameters;
+2. executes request;
+3. saves response to disk;
+4. accounts for and logs credit cost;
+5. advances pagination (when `nextPageToken` is present).
 
-### 3) Armazenamento particionado
+### 3) Partitioned storage
 
-Saída no padrão:
+Output pattern:
 
 ```text
 {storage_root}/{endpoint}/{timestamp}/response_001.json
@@ -42,17 +42,17 @@ Saída no padrão:
 ...
 ```
 
-Esse padrão facilita ingestão posterior por jobs de transformação e catálogos de dados.
+This pattern eases later ingestion by transformation jobs and data catalogs.
 
-### 4) Logging estruturado
+### 4) Structured logging
 
-`structlog` em JSON para facilitar integração com ferramentas de observabilidade.
+`structlog` in JSON to ease integration with observability tools.
 
-### 5) Orquestração recorrente
+### 5) Recurring orchestration
 
-`RecurringCollector` executa qualquer job Python em intervalo fixo, suficiente para cron-like local, prototipagem e integração com agendadores externos.
+`RecurringCollector` runs any Python job at a fixed interval, sufficient for local cron-like usage, prototyping, and integration with external schedulers.
 
-## Diagrama de arquitetura (Mermaid)
+## Architecture diagram (Mermaid)
 
 ```mermaid
 flowchart LR
@@ -66,7 +66,7 @@ flowchart LR
     E --> I[Structlog JSON Logs]
 ```
 
-## Exemplo de extensão de endpoint
+## Example endpoint extension
 
 ```python
 from youtube_data_pipeline.client import YouTubeDataClient
@@ -84,7 +84,7 @@ client.register_endpoint(
 )
 ```
 
-## Limitações conhecidas
+## Known limitations
 
-- O custo de crédito é modelado pelo custo-base por chamada (não contempla variações futuras de política).
-- Retry/backoff e tratamento de erros podem ser acoplados na próxima iteração.
+- Credit cost is modeled by the base cost per call (does not account for future policy changes).
+- Retry/backoff and error handling can be added in the next iteration.
