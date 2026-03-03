@@ -1,0 +1,76 @@
+{
+  "pipeline_type": "channel_videos",
+  "quota": {
+    "daily_limit": 10000,
+    "soft_limit": 9000,
+    "stop_on_soft_limit": true
+  },
+  "seeds": {
+    "channel_ids": ["UCKDjjeeBmdaiicey2nImISw", "UC9U4nIDyIzzelXrjNQXNvxA"],
+    "playlist_ids": [],
+    "search_queries": [],
+    "video_ids": [],
+    "search_channels_queries": [],
+    "search_videos_queries": []
+  },
+  "scope": {
+    "resources": [
+      "channels",
+      "playlistItems",
+      "videos"
+    ],
+    "parts": {
+      "channels": [
+        "snippet",
+        "statistics",
+        "contentDetails"
+      ],
+      "playlistItems": [
+        "snippet",
+        "contentDetails"
+      ],
+      "videos": [
+        "snippet",
+        "statistics",
+        "contentDetails"
+      ],
+      "commentThreads": [
+        "snippet",
+        "replies"
+      ],
+      "comments": [
+        "snippet"
+      ]
+    },
+    "comments_enabled": true
+  },
+  "pipeline_options": {
+    "channel_videos": {
+      "description": "Collect videos from specified channels",
+      "seeds_key": "channel_ids",
+      "max_pages": null,
+      "batch_size": 50,
+      "incremental": false
+    },
+    "search_channels": {
+      "description": "Search for channels by query and fetch metadata",
+      "seeds_key": "search_channels_queries",
+      "max_pages": null,
+      "order": "relevance"
+    },
+    "search_videos": {
+      "description": "Search for videos by query and fetch metadata",
+      "seeds_key": "search_videos_queries",
+      "max_pages": null,
+      "order": "relevance"
+    },
+    "video_comments": {
+      "description": "Collect comments and replies from specified videos",
+      "seeds_key": "video_ids",
+      "thread_max_pages": null,
+      "reply_max_pages": null,
+      "order": "relevance",
+      "include_replies": true
+    }
+  }
+}
