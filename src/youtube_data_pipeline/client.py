@@ -56,7 +56,7 @@ class YouTubeDataClient:
         files: list[str] = []
         responses: list[dict[str, Any]] = []
 
-        for page_idx in range(1, max_pages + 1):
+        for page_idx in range(1, max_pages + 2):
             payload = self._execute_request(definition, request_params)
             responses.append(payload)
             file_path = self.storage.save(
