@@ -208,3 +208,6 @@ __marimo__/
 
 # Dev Preference
 data/
+notebooks/
+*.ipynb
+logs/
