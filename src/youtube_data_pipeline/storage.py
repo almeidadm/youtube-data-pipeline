@@ -114,6 +114,47 @@ class ResponseStorage:
             "timestamp": timestamp or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"),
         }
 
+    def save_error(
+        self,
+        endpoint: str,
+        payload: dict,
+        page_idx: int = 1,
+        timestamp: str | None = None,
+        *,
+        run_id: str | None = None,
+        origin: str | None = None,
+        origin_field: str | None = None,
+        params: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        run_id = self._resolve_run_id(run_id)
+        origin_value = origin or "unknown"
+        origin_field = origin_field or "unknown"
+        origin_hash = self._origin_hash(origin_value)
+        params_hash = self._params_hash(params)
+
+        run_dir = self.root / "runs" / run_id
+        output_dir = run_dir / f"endpoint={endpoint}" / f"origin={origin_field}:{origin_hash}"
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        suffix = ".json.gz" if self.compress else ".json"
+        output_file = output_dir / f"error_page_{page_idx:03d}{suffix}"
+        content = json.dumps(payload, ensure_ascii=False, indent=2)
+        if self.compress:
+            self._atomic_write_gzip(output_file, content)
+        else:
+            self._atomic_write_text(output_file, content)
+
+        return {
+            "path": output_file,
+            "run_id": run_id,
+            "origin": origin_value,
+            "origin_field": origin_field,
+            "origin_hash": origin_hash,
+            "params_hash": params_hash,
+            "relative_path": str(output_file.relative_to(run_dir)),
+            "timestamp": timestamp or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"),
+        }
+
     def append_manifest(self, entry: Mapping[str, Any], *, run_id: str | None = None) -> Path:
         run_id = self._resolve_run_id(run_id)
         run_dir = self.root / "runs" / run_id

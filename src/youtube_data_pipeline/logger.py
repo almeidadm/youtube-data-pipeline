@@ -71,6 +71,16 @@ class _FallbackLogger:
         }
         self._logger.info(json.dumps(record, ensure_ascii=False))
 
+    def error(self, event: str, **kwargs: Any) -> None:
+        record = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "level": "error",
+            "event": event,
+            **self._bound,
+            **kwargs,
+        }
+        self._logger.error(json.dumps(record, ensure_ascii=False))
+
 
 def get_logger(name: str = "youtube_data_pipeline") -> Any:
     if structlog is None:

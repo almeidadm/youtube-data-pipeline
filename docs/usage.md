@@ -48,6 +48,17 @@ if result["limit_reached"]:
     print("Credit limit reached:", result["stopped_reason"])
 ```
 
+## Error handling e descrições
+
+As descrições por endpoint estão em `tipos_de_erro.md` e são adicionadas ao campo
+`description` em logs e artefatos de erro.
+
+Exemplo de log de erro:
+
+```json
+{"timestamp":"2026-03-04T12:00:00+00:00","level":"error","event":"youtube_api_error","run_id":"example-run-001","request_id":"example-run-001-000123","endpoint":"comments","page":1,"status":404,"reason":"commentNotFound","description":"Não foi possível encontrar um ou mais dos comentários especificados. Verifique se os valores dos parâmetros id e parentId da solicitação estão corretos.","action":"skip"}
+```
+
 ## Recurring execution
 
 ```python
