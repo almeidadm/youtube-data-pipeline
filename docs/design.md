@@ -32,17 +32,18 @@ Flow:
 4. accounts for and logs credit cost;
 5. advances pagination (when `nextPageToken` is present).
 
-### 3) Partitioned storage
+### 3) Run-scoped storage with manifest
 
 Output pattern:
 
 ```text
-{storage_root}/{endpoint}/{timestamp}/response_001.json
-{storage_root}/{endpoint}/{timestamp}/response_002.json
+{storage_root}/runs/{run_id}/manifest.jsonl
+{storage_root}/runs/{run_id}/endpoint=search/origin=q:HASH/page_001.json
+{storage_root}/runs/{run_id}/endpoint=search/origin=q:HASH/page_002.json
 ...
 ```
 
-This pattern eases later ingestion by transformation jobs and data catalogs.
+This pattern provides run-level grouping, safer writes, and a machine-friendly index while keeping manual navigation possible.
 
 ### 4) Structured logging
 

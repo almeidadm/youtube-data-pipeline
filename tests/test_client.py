@@ -55,3 +55,50 @@ def test_client_fetch_tracks_pagination_and_credits(tmp_path: Path) -> None:
     assert len(result["responses"]) == 2
     assert len(result["files"]) == 2
     assert result["credit_state"]["total_spent"] == 200
+    assert result["limit_reached"] is False
+    assert result["stopped_reason"] is None
+
+
+def test_client_fetch_respects_credit_limit_before_first_call(tmp_path: Path) -> None:
+    service = _Service({"search": _Resource([{"items": [1]}])})
+    client = YouTubeDataClient(service=service, storage=ResponseStorage(root=tmp_path))
+
+    result = client.fetch(
+        "search",
+        {"part": "snippet"},
+        max_pages=1,
+        credit_limit=99,
+    )
+
+    assert result["responses"] == []
+    assert result["files"] == []
+    assert result["credit_state"]["total_spent"] == 0
+    assert result["limit_reached"] is True
+    assert result["stopped_reason"] == "credit_limit"
+
+
+def test_client_fetch_stops_when_limit_reached_mid_pagination(tmp_path: Path) -> None:
+    service = _Service(
+        {
+            "search": _Resource(
+                [
+                    {"items": [1], "nextPageToken": "next"},
+                    {"items": [2]},
+                ]
+            )
+        }
+    )
+    client = YouTubeDataClient(service=service, storage=ResponseStorage(root=tmp_path))
+
+    result = client.fetch(
+        "search",
+        {"part": "snippet"},
+        max_pages=2,
+        credit_limit=150,
+    )
+
+    assert len(result["responses"]) == 1
+    assert len(result["files"]) == 1
+    assert result["credit_state"]["total_spent"] == 100
+    assert result["limit_reached"] is True
+    assert result["stopped_reason"] == "credit_limit"
