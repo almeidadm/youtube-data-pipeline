@@ -38,8 +38,11 @@ class YouTubeDataClient:
 
     @classmethod
     def from_config(cls, config: YouTubeDataConfig) -> "YouTubeDataClient":
-        configure_logging(log_path=config.normalized_log_path())
         from googleapiclient.discovery import build
+
+        run_id = config.run_id or uuid4().hex
+        storage_root = config.normalized_storage_root()
+        configure_logging(log_path=config.resolved_log_path(run_id))
 
         service = build(
             "youtube",
@@ -47,9 +50,8 @@ class YouTubeDataClient:
             developerKey=config.api_key,
             cache_discovery=config.discovery_cache,
         )
-        run_id = config.run_id or uuid4().hex
         storage = ResponseStorage(
-            root=config.normalized_storage_root(),
+            root=storage_root,
             run_id=run_id,
             compress=config.compress_responses,
         )
@@ -202,17 +204,16 @@ class YouTubeDataClient:
                         uri=getattr(exc, "uri", None),
                         retry_policy=self.retry_policy,
                     )
-                    errors.append(error_info.to_dict())
+                    error_payload = error_info.to_dict()
+                    errors.append(error_payload)
                     logger.error(
                         "youtube_api_error",
                         request_id=request_id,
-                        origin=origin_value,
                         origin_field=origin_field,
                         cost=definition.base_credit_cost,
                         cumulative_credits=credit_state["total_spent"],
-                        page=page_idx,
                         per_endpoint=credit_state["per_endpoint"],
-                        **error_info.to_dict(),
+                        **error_payload,
                     )
 
                     should_retry = (

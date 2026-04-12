@@ -1,9 +1,11 @@
+import hashlib
 import json
 import logging
 import re
 from pathlib import Path
 
 from youtube_data_pipeline.client import YouTubeDataClient
+from youtube_data_pipeline.config import YouTubeDataConfig
 from youtube_data_pipeline.logger import configure_logging, get_logger
 from youtube_data_pipeline.storage import ResponseStorage
 
@@ -55,7 +57,8 @@ def _read_last_json(log_path: Path) -> dict:
 
 def test_configure_logging_writes_jsonl(tmp_path: Path) -> None:
     _reset_logging()
-    log_path = tmp_path / "logs.jsonl"
+    config = YouTubeDataConfig(api_key="test", storage_root=tmp_path, run_id="run-1")
+    log_path = config.resolved_log_path("run-1")
 
     configure_logging(log_path=log_path)
     logger = get_logger("test").bind(run_id="run-1")
@@ -70,7 +73,8 @@ def test_configure_logging_writes_jsonl(tmp_path: Path) -> None:
 
 def test_client_fetch_emits_log_fields(tmp_path: Path) -> None:
     _reset_logging()
-    log_path = tmp_path / "client_logs.jsonl"
+    config = YouTubeDataConfig(api_key="test", storage_root=tmp_path, run_id="run-logs")
+    log_path = config.resolved_log_path("run-logs")
 
     configure_logging(log_path=log_path)
     service = _Service({"search": _Resource([{"items": [1]}])})
@@ -95,3 +99,12 @@ def test_client_fetch_emits_log_fields(tmp_path: Path) -> None:
     assert payload["file"].endswith("page_001.json")
     assert "endpoint=search" in Path(payload["file"]).parts
     assert re.match(r"run-logs-\d{6}$", payload["request_id"]) is not None
+
+
+def test_resolved_log_path_includes_hash(tmp_path: Path) -> None:
+    config = YouTubeDataConfig(api_key="test", storage_root=tmp_path, run_id="run-hash")
+    log_path = config.resolved_log_path("run-hash")
+
+    expected_hash = hashlib.sha256("run-hash".encode("utf-8")).hexdigest()[:12]
+    expected = tmp_path / "runs" / "run-hash" / f"youtube_data_pipeline-{expected_hash}.jsonl"
+    assert log_path == expected

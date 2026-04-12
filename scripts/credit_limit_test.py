@@ -127,8 +127,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--log-path",
-        default="./logs/youtube_data_pipeline.jsonl",
-        help="Caminho do arquivo JSONL de logs.",
+        default="youtube_data_pipeline.jsonl",
+        help=(
+            "Nome base do arquivo JSONL de logs (gravado em "
+            "{storage_root}/runs/{run_id}/ com hash do run_id)."
+        ),
     )
     parser.add_argument(
         "--run-id",

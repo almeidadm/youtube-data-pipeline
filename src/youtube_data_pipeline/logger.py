@@ -27,6 +27,13 @@ def configure_logging(log_path: str | Path | None = None) -> None:
     if log_path is not None:
         log_path = Path(log_path)
         log_path.parent.mkdir(parents=True, exist_ok=True)
+        for handler in list(root.handlers):
+            if isinstance(handler, logging.FileHandler) and getattr(
+                handler, "_ydp_managed", False
+            ):
+                if Path(handler.baseFilename) != log_path:
+                    root.removeHandler(handler)
+                    handler.close()
         has_file = any(
             isinstance(handler, logging.FileHandler)
             and getattr(handler, "baseFilename", None)
@@ -36,6 +43,7 @@ def configure_logging(log_path: str | Path | None = None) -> None:
         if not has_file:
             file_handler = logging.FileHandler(log_path, encoding="utf-8")
             file_handler.setFormatter(logging.Formatter("%(message)s"))
+            file_handler._ydp_managed = True  # type: ignore[attr-defined]
             root.addHandler(file_handler)
 
     if structlog is not None:
