@@ -4,6 +4,10 @@ from .credits import CreditMonitor
 from .errors import ErrorInfo, FetchError, RetryPolicy
 from .orchestration import RecurringCollector
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 __all__ = [
     "CreditMonitor",
     "ErrorInfo",
