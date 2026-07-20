@@ -8,7 +8,6 @@ from youtube_data_pipeline import YouTubeDataClient, YouTubeDataConfig
 config = YouTubeDataConfig(
     api_key="...",
     storage_root="./data/raw",
-    log_path="./logs/youtube_data_pipeline.jsonl",
     run_id="example-run-001",
 )
 client = YouTubeDataClient.from_config(config)
@@ -48,6 +47,17 @@ if result["limit_reached"]:
     print("Credit limit reached:", result["stopped_reason"])
 ```
 
+## Error handling e descrições
+
+As descrições por endpoint estão em `tipos_de_erro.md` e são adicionadas ao campo
+`description` em logs e artefatos de erro.
+
+Exemplo de log de erro:
+
+```json
+{"timestamp":"2026-03-04T12:00:00+00:00","level":"error","event":"youtube_api_error","run_id":"example-run-001","request_id":"example-run-001-000123","endpoint":"comments","page":1,"status":404,"reason":"commentNotFound","description":"Não foi possível encontrar um ou mais dos comentários especificados. Verifique se os valores dos parâmetros id e parentId da solicitação estão corretos.","action":"skip"}
+```
+
 ## Recurring execution
 
 ```python
@@ -68,7 +78,13 @@ runner.run(job, iterations=24)
 
 ## Logs and credits
 
-Each request page writes a JSONL entry to `./logs/youtube_data_pipeline.jsonl` (default) with fields that are easy to parse:
+Each request page writes a JSONL entry to a run-scoped log file (default):
+
+```
+{storage_root}/runs/{run_id}/youtube_data_pipeline-{run_id_hash}.jsonl
+```
+
+The `{run_id_hash}` is the first 12 hex chars of the SHA-256 hash of `run_id`, keeping log files unique and short.
 
 - event
 - run_id
@@ -85,10 +101,10 @@ Each request page writes a JSONL entry to `./logs/youtube_data_pipeline.jsonl` (
 Example JSONL line:
 
 ```json
-{"timestamp":"2026-03-04T12:00:00+00:00","level":"info","event":"youtube_api_request","run_id":"example-run-001","request_id":"example-run-001-000001","endpoint":"search","origin":"investments portugal brazil","origin_field":"q","cost":100,"cumulative_credits":100,"per_endpoint":{"search":100},"page":1,"file":"/path/data/raw/search/20260304T120000Z/response_001.json"}
+{"timestamp":"2026-03-04T12:00:00+00:00","level":"info","event":"youtube_api_request","run_id":"example-run-001","request_id":"example-run-001-000001","endpoint":"search","origin":"investments portugal brazil","origin_field":"q","cost":100,"cumulative_credits":100,"per_endpoint":{"search":100},"page":1,"file":"/path/data/raw/runs/example-run-001/endpoint=search/origin=q:HASH/page_001.json"}
 ```
 
-To override the log path, set `log_path` in `YouTubeDataConfig`. To control the origin explicitly, pass `origin` to `fetch`.
+To override the base log filename, set `log_path` in `YouTubeDataConfig`. The file is always stored under `{storage_root}/runs/{run_id}/` and suffixed with the run hash. To control the origin explicitly, pass `origin` to `fetch`.
 
 ## Storage layout
 

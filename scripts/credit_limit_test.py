@@ -59,6 +59,13 @@ def download_thumbnails(thumbnails: dict[str, str], output_dir: Path) -> None:
         urlretrieve(url, output_path)
 
 
+def should_abort(result: dict[str, Any]) -> bool:
+    for error in result.get("errors", []):
+        if error.get("action") == "stop":
+            return True
+    return False
+
+
 def collect_comments(
     client: YouTubeDataClient,
     video_id: str,
@@ -77,7 +84,7 @@ def collect_comments(
         max_pages=comment_pages,
         credit_limit=credit_limit,
     )
-    if threads_result.get("limit_reached"):
+    if threads_result.get("limit_reached") or should_abort(threads_result):
         return True
 
     for response in threads_result["responses"]:
@@ -96,7 +103,7 @@ def collect_comments(
                 max_pages=reply_pages,
                 credit_limit=credit_limit,
             )
-            if replies_result.get("limit_reached"):
+            if replies_result.get("limit_reached") or should_abort(replies_result):
                 return True
     return False
 
@@ -120,8 +127,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--log-path",
-        default="./logs/youtube_data_pipeline.jsonl",
-        help="Caminho do arquivo JSONL de logs.",
+        default="youtube_data_pipeline.jsonl",
+        help=(
+            "Nome base do arquivo JSONL de logs (gravado em "
+            "{storage_root}/runs/{run_id}/ com hash do run_id)."
+        ),
     )
     parser.add_argument(
         "--run-id",
@@ -152,7 +162,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--search-pages",
         type=int,
-        default=10,
+        default=15,
         help="Número máximo de páginas do search por termo.",
     )
     parser.add_argument(
@@ -213,7 +223,7 @@ def main() -> None:
             max_pages=args.search_pages,
             credit_limit=credit_limit,
         )
-        if search_result.get("limit_reached"):
+        if search_result.get("limit_reached") or should_abort(search_result):
             limit_hit = True
             break
 
@@ -235,7 +245,7 @@ def main() -> None:
                 max_pages=1,
                 credit_limit=credit_limit,
             )
-            if videos_result.get("limit_reached"):
+            if videos_result.get("limit_reached") or should_abort(videos_result):
                 limit_hit = True
                 break
 
@@ -255,7 +265,7 @@ def main() -> None:
                         max_pages=1,
                         credit_limit=credit_limit,
                     )
-                    if captions_result.get("limit_reached"):
+                    if captions_result.get("limit_reached") or should_abort(captions_result):
                         limit_hit = True
                         break
 

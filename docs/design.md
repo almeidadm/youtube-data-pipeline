@@ -85,7 +85,17 @@ client.register_endpoint(
 )
 ```
 
+## Error handling
+
+O cliente utiliza uma política determinística de erro com três ações possíveis:
+
+- retry: erros transitórios com backoff exponencial;
+- stop: falhas não recuperáveis (auth, validação, quota, forbidden);
+- skip: erros por recurso inexistente/desabilitado, permitindo continuar a pipeline.
+
+As descrições humanas dos erros por endpoint são mantidas em `tipos_de_erro.md` e
+usadas para enriquecer logs e artefatos de erro.
+
 ## Known limitations
 
 - Credit cost is modeled by the base cost per call (does not account for future policy changes).
-- Retry/backoff and error handling can be added in the next iteration.

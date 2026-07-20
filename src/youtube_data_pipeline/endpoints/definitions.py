@@ -30,8 +30,11 @@ DEFAULT_ENDPOINTS: dict[str, EndpointDefinition] = {
             "type",
             "pageToken",
             "publishedAfter",
+            "publishedBefore",
             "regionCode",
+            "relevanceLanguage",
             "videoCategoryId",
+            "videoDuration",
         },
     ),
     "videos": EndpointDefinition(
