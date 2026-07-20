@@ -1,10 +1,12 @@
 import gzip
 import hashlib
 import json
-from dataclasses import dataclass
+import threading
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 from collections.abc import Mapping
 
 
@@ -13,6 +15,11 @@ class ResponseStorage:
     root: Path
     run_id: str | None = None
     compress: bool = False
+    # append_manifest() é chamado por várias threads sobre o mesmo arquivo; serializa
+    # para não interleavar linhas JSONL. (Escrita de respostas usa tmp único, abaixo.)
+    _manifest_lock: "threading.Lock" = field(
+        default_factory=threading.Lock, init=False, repr=False, compare=False
+    )
 
     def _resolve_run_id(self, run_id: str | None) -> str:
         if run_id:
@@ -33,12 +40,14 @@ class ResponseStorage:
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     def _atomic_write_text(self, path: Path, content: str) -> None:
-        tmp_path = path.with_name(f"{path.name}.tmp")
+        # tmp único por escrita: sob coleta paralela duas threads podem mirar o mesmo
+        # arquivo final (ex.: origin compartilhada), e um ".tmp" fixo seria corrompido.
+        tmp_path = path.with_name(f"{path.name}.{uuid4().hex}.tmp")
         tmp_path.write_text(content, encoding="utf-8")
         tmp_path.replace(path)
 
     def _atomic_write_gzip(self, path: Path, content: str) -> None:
-        tmp_path = path.with_name(f"{path.name}.tmp")
+        tmp_path = path.with_name(f"{path.name}.{uuid4().hex}.tmp")
         with gzip.open(tmp_path, "wt", encoding="utf-8") as handle:
             handle.write(content)
         tmp_path.replace(path)
@@ -160,6 +169,8 @@ class ResponseStorage:
         run_dir = self.root / "runs" / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
         manifest_path = run_dir / "manifest.jsonl"
-        with manifest_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        line = json.dumps(entry, ensure_ascii=False) + "\n"
+        with self._manifest_lock:
+            with manifest_path.open("a", encoding="utf-8") as handle:
+                handle.write(line)
         return manifest_path

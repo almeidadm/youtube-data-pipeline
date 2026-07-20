@@ -1,3 +1,4 @@
+import threading
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -35,6 +36,16 @@ class YouTubeDataClient:
     persist_errors: bool = True
     count_failed_requests: bool = True
     retry_policy: RetryPolicy = field(default_factory=RetryPolicy)
+    # Concorrência: o transporte httplib2 do googleapiclient NÃO é thread-safe — um
+    # único Http compartilhado entre threads corrompe o heap (SIGABRT). Cada thread
+    # usa seu próprio Http (thread-local), e o contador de sequência é protegido por
+    # lock para não duplicar request_id. fetch() pode rodar em paralelo (ThreadPool).
+    _http_local: threading.local = field(
+        default_factory=threading.local, init=False, repr=False, compare=False
+    )
+    _seq_lock: "threading.Lock" = field(
+        default_factory=threading.Lock, init=False, repr=False, compare=False
+    )
 
     @classmethod
     def from_config(cls, config: YouTubeDataConfig) -> "YouTubeDataClient":
@@ -44,12 +55,20 @@ class YouTubeDataClient:
         storage_root = config.normalized_storage_root()
         configure_logging(log_path=config.resolved_log_path(run_id))
 
-        service = build(
-            "youtube",
-            "v3",
-            developerKey=config.api_key,
-            cache_discovery=config.discovery_cache,
-        )
+        build_kwargs: dict[str, Any] = {
+            "developerKey": config.api_key,
+            "cache_discovery": config.discovery_cache,
+        }
+        if config.static_discovery:
+            service = build("youtube", "v3", **build_kwargs)
+        else:
+            # Discovery dinâmico expõe endpoints novos (ex.: videos.batchGetStats)
+            # antes de a lib embutir o doc; em falha (rede/chave), degrada para o
+            # doc estático local para não derrubar o boot.
+            try:
+                service = build("youtube", "v3", static_discovery=False, **build_kwargs)
+            except Exception:
+                service = build("youtube", "v3", **build_kwargs)
         storage = ResponseStorage(
             root=storage_root,
             run_id=run_id,
@@ -105,7 +124,10 @@ class YouTubeDataClient:
         stopped_reason: str | None = None
         endpoint_key = f"{definition.resource}.{definition.method}"
 
-        for page_idx in range(1, max_pages + 2):
+        # Exatamente max_pages páginas no máximo (range é exclusivo no fim). O +2
+        # anterior era um off-by-one: buscava max_pages+1 páginas quando havia
+        # nextPageToken (ex.: max_pages=5 registrava page=6 em produção).
+        for page_idx in range(1, max_pages + 1):
             attempt = 0
             has_next_page = False
             while True:
@@ -117,8 +139,9 @@ class YouTubeDataClient:
                         break
                 attempt += 1
                 total_attempts += 1
-                self.request_seq += 1
-                request_id = f"{self.run_id}-{self.request_seq:06d}"
+                with self._seq_lock:
+                    self.request_seq += 1
+                    request_id = f"{self.run_id}-{self.request_seq:06d}"
                 try:
                     payload = self._execute_request(definition, request_params)
                     credit_state = self.credit_monitor.register(
@@ -181,6 +204,11 @@ class YouTubeDataClient:
                         credit_state = self.credit_monitor.register(
                             endpoint, definition.base_credit_cost
                         )
+                    else:
+                        # Sem cobrar o request falho (não consome cota), mas credit_state
+                        # precisa estar ligado: o logger/manifest abaixo o usam mesmo quando
+                        # o erro ocorre na 1ª página (nenhum sucesso prévio o ligou).
+                        credit_state = self.credit_monitor.snapshot()
                     payload_dict = parse_error_content(exc.content)
                     status, reason, message, domain, location, location_type, raw_errors = (
                         extract_error_details(payload_dict)
@@ -327,7 +355,28 @@ class YouTubeDataClient:
     ) -> dict[str, Any]:
         resource = getattr(self.service, definition.resource)()
         method = getattr(resource, definition.method)
-        return method(**params).execute()
+        request = method(**params)
+        # httplib2 (transporte padrão do googleapiclient) NÃO é thread-safe: um Http
+        # compartilhado entre threads corrompe o heap. HttpRequest.execute() usa
+        # request.http quando não recebe http explícito, então injetamos um Http
+        # exclusivo da thread. O developerKey já vai embutido na URI — Http "puro"
+        # (build_http) basta, sem credenciais a anexar. Em fakes de teste sem o
+        # atributo, ignoramos silenciosamente (execute() não usa transporte real).
+        try:
+            request.http = self._thread_http()
+        except AttributeError:
+            pass
+        return request.execute()
+
+    def _thread_http(self) -> Any:
+        """Http httplib2 dedicado à thread atual (httplib2 não é thread-safe)."""
+        http = getattr(self._http_local, "http", None)
+        if http is None:
+            from googleapiclient.http import build_http
+
+            http = build_http()
+            self._http_local.http = http
+        return http
 
     def _build_stopped_reason(self, error_info: Any) -> str:
         if error_info.reason:

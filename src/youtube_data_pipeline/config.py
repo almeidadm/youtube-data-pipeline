@@ -9,6 +9,11 @@ class YouTubeDataConfig:
     api_key: str
     storage_root: str | Path = "./data/raw"
     discovery_cache: bool = False
+    # True (default): usa o discovery doc ESTÁTICO embutido na googleapiclient —
+    # sem rede no boot, mas endpoints novos (ex.: videos.batchGetStats, jun/2026)
+    # só aparecem quando a lib for atualizada. False: busca o doc dinâmico na API
+    # (sempre atual); se a busca falhar, o client cai de volta no doc estático.
+    static_discovery: bool = True
     log_path: str | Path | None = "youtube_data_pipeline.jsonl"
     run_id: str | None = None
     compress_responses: bool = False
