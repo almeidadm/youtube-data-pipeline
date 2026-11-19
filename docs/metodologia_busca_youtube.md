@@ -1,5 +1,15 @@
 # Metodologia de busca de notícias no YouTube
 
+> **Nota de 2026-11-06 (atualizada em 2026-11-18) — governança de cota e novo plano de 6 meses no YRP.** As projeções iniciais desta
+> metodologia foram calculadas para a concessão de **110.000 unidades/dia** (vigente de
+> 2026-04-05 a 2026-11-06). Após 2026-11-06, a chave voltou temporariamente ao padrão da
+> YouTube Data API (**10.000 unidades/dia**). Em **2026-11-18**, o plano de solicitação e implementação
+> para janela de **6 meses (180 dias)** no YouTube Researcher Program (`docs/youtube_researcher_program_quota_plan_20261118.md`)
+> instituiu a governança **dual-bucket de 250.000 unidades/dia** no `CreditMonitor`: **200.000 unidades/dia**
+> (`2.000` chamadas/dia) para `search.list` e **50.000 unidades/dia** para endpoints gerais de leitura
+> (`videos.list`, `channels.list`, `playlistItems.list`, `commentThreads.list`, `comments.list`, `videoCategories.list`),
+> com `captions.list` explicitamente bloqueado no perfil YRP.
+
 ## 1. Visão geral do dataset
 
 O dataset `predictions_s2_factcheck_scrape_unified.csv` contém **45.670 registros** de fact-checking provenientes de 13 agências brasileiras e internacionais (Boatos.org, Estadão Verifica, Aos Fatos, AFP Checamos, G1, entre outras). O dataset possui uma coluna `label` com dois valores: `outros` (43.705) e `mercado` (1.965).

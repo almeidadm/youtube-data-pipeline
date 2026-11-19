@@ -92,6 +92,17 @@ Main output:
 For a complete guide (flow, parameters, artifacts), see
 `docs/channel_collection.md`.
 
+## Documentation
+
+The documentation index (Diátaxis quadrants, architecture diagram, quota plan)
+lives in [`docs/README.md`](docs/README.md). Highlights:
+
+- `docs/usage.md` — client usage and endpoint reference.
+- `docs/comando_collect_videos_from_terms.md` — resumable collection from terms
+  files and frozen `.jsonl` shards.
+- `docs/youtube_researcher_program_quota_plan_20261118.md` — YRP dual-bucket
+  quota governance (search vs. general-read buckets).
+
 ## Development
 
 ```bash
