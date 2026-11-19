@@ -25,14 +25,15 @@ from typing import Any
 CHECKPOINT_NAME = "terms_collection_checkpoint.json"
 SUMMARY_NAME = "terms_collection_summary.json"
 MANIFEST_NAME = "manifest.jsonl"
+CLUSTER_SIGHTINGS_NAME = "cluster_sightings.jsonl"
 
 
 def parse_args() -> argparse.Namespace:
     """Parse CLI arguments."""
     parser = argparse.ArgumentParser(
         description=(
-            "Unifica múltiplas runs (mesmo fingerprint) em um único diretório "
-            "de run retomável."
+            "Unifica múltiplas runs (mesmo fingerprint ou partições disjuntas) "
+            "em um único diretório de run."
         )
     )
     parser.add_argument(
@@ -57,6 +58,15 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Preservar credit_state somado das runs de origem. Por padrão "
             "o crédito é zerado para permitir retomar a coleta."
+        ),
+    )
+    parser.add_argument(
+        "--disjoint-shards",
+        action="store_true",
+        help=(
+            "Unificar partições estáticas disjuntas (fingerprints distintos). "
+            "Combina todos os per_term ordenados por rank e consolida "
+            "cluster_sightings.jsonl."
         ),
     )
     parser.add_argument(
@@ -145,6 +155,50 @@ def merge_manifests(src_roots: list[Path], dst_root: Path) -> int:
     return len(entries)
 
 
+def merge_cluster_sightings(src_roots: list[Path], dst_root: Path) -> int:
+    """Concatenate cluster_sightings.jsonl from source runs, sorted by rank."""
+    entries: list[dict[str, Any]] = []
+    seen_sightings: set[tuple[Any, ...]] = set()
+    for root in src_roots:
+        sightings_file = root / CLUSTER_SIGHTINGS_NAME
+        if not sightings_file.exists():
+            continue
+        for raw_line in sightings_file.read_text(encoding="utf-8").splitlines():
+            if not raw_line.strip():
+                continue
+            payload = json.loads(raw_line)
+            sighting_key = (
+                payload.get("claim_cluster_id") or payload.get("query_text") or payload.get("term"),
+                payload.get("arm"),
+                payload.get("query_id"),
+                payload.get("video_duration"),
+                payload.get("wave_type"),
+                payload.get("page"),
+                payload.get("rank_in_page"),
+                payload.get("video_id"),
+            )
+            if sighting_key in seen_sightings:
+                continue
+            seen_sightings.add(sighting_key)
+            entries.append(payload)
+    if not entries:
+        return 0
+    entries.sort(
+        key=lambda e: (
+            e.get("rank") if e.get("rank") is not None else 10**9,
+            str(e.get("claim_cluster_id") or ""),
+            str(e.get("arm") or ""),
+            int(e.get("page") or 0),
+            int(e.get("rank_in_page") or 0),
+        )
+    )
+    destination = dst_root / CLUSTER_SIGHTINGS_NAME
+    with destination.open("w", encoding="utf-8") as handle:
+        for entry in entries:
+            handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    return len(entries)
+
+
 def pick_most_advanced(checkpoints: list[dict[str, Any]]) -> dict[str, Any]:
     """Return the checkpoint that processed the most terms globally."""
     return max(
@@ -170,51 +224,90 @@ def build_unified_checkpoint(
     run_id: str,
     checkpoints: list[dict[str, Any]],
     keep_credits: bool,
+    disjoint_shards: bool = False,
 ) -> dict[str, Any]:
     """Build the merged checkpoint payload."""
     fingerprints = {cp["config"]["fingerprint"] for cp in checkpoints}
-    if len(fingerprints) != 1:
+    if len(fingerprints) != 1 and not disjoint_shards:
         raise SystemExit(
-            f"Runs com fingerprints distintos ({fingerprints}). Unificação inviável."
+            f"Runs com fingerprints distintos ({fingerprints}). "
+            "Use --disjoint-shards para unificar partições disjuntas."
         )
 
     advanced = pick_most_advanced(checkpoints)
-    per_term = list(advanced["per_term"])
+    if disjoint_shards:
+        combined_per_term: list[dict[str, Any]] = []
+        seen_keys: set[tuple[Any, ...]] = set()
+        for cp in checkpoints:
+            for item in cp.get("per_term", []):
+                key = (
+                    str(item.get("claim_cluster_id") or item.get("term")),
+                    item.get("arm"),
+                    item.get("query_id"),
+                    item.get("video_duration"),
+                    item.get("wave_type"),
+                )
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                combined_per_term.append(dict(item))
+        combined_per_term.sort(
+            key=lambda item: (
+                item.get("rank") if item.get("rank") is not None else 10**9,
+                str(item.get("claim_cluster_id") or item.get("term") or ""),
+            )
+        )
+        for idx, item in enumerate(combined_per_term):
+            item["term_index"] = idx
+        per_term = combined_per_term
+        merged_config = dict(advanced["config"])
+        merged_config["terms_total"] = sum(
+            int(cp["config"].get("terms_total", 0)) for cp in checkpoints
+        )
+        merged_config["disjoint_shards_merged"] = len(checkpoints)
+        next_term_index = len(per_term)
+        all_completed = all(cp.get("status") == "completed" for cp in checkpoints)
+        status = "completed" if all_completed else "stopped"
+        stop_reason = None if all_completed else advanced.get("stop_reason")
+        resume_supported = not disjoint_shards
+    else:
+        per_term = list(advanced["per_term"])
+        merged_config = dict(advanced["config"])
+        next_term_index = advanced["next_term_index"]
+        status = "stopped"
+        stop_reason = advanced.get("stop_reason")
+        resume_supported = True
+
     seen_video_ids = merge_ordered_unique(
         [checkpoint["seen_video_ids"] for checkpoint in checkpoints]
     )
 
     credit_state = (
-        sum_credit_state(checkpoints)
-        if keep_credits
-        else {"total_spent": 0, "per_endpoint": {}}
+        sum_credit_state(checkpoints) if keep_credits else {"total_spent": 0, "per_endpoint": {}}
     )
 
     started_at = min(cp["started_at"] for cp in checkpoints)
-    updated_at = max(
-        cp.get("updated_at", cp["started_at"]) for cp in checkpoints
-    )
+    updated_at = max(cp.get("updated_at", cp["started_at"]) for cp in checkpoints)
     finished_at = max(
-        (cp.get("finished_at") or cp.get("updated_at", cp["started_at"]))
-        for cp in checkpoints
+        (cp.get("finished_at") or cp.get("updated_at", cp["started_at"])) for cp in checkpoints
     )
 
     return {
         "schema_version": 1,
         "run_id": run_id,
-        "status": "stopped",
+        "status": status,
         "started_at": started_at,
         "updated_at": updated_at,
         "finished_at": finished_at,
-        "config": dict(advanced["config"]),
+        "config": merged_config,
         "credit_state": credit_state,
         "request_seq": 0,
         "seen_video_ids": seen_video_ids,
         "per_term": per_term,
         "active_term": None,
-        "next_term_index": advanced["next_term_index"],
-        "stop_reason": advanced.get("stop_reason"),
-        "resume_supported": True,
+        "next_term_index": next_term_index,
+        "stop_reason": stop_reason,
+        "resume_supported": resume_supported,
     }
 
 
@@ -232,7 +325,7 @@ def build_summary(checkpoint: dict[str, Any], source_names: list[str]) -> dict[s
         "stop_reason": checkpoint["stop_reason"],
         "status": checkpoint["status"],
         "next_term_index": checkpoint["next_term_index"],
-        "resume_supported": True,
+        "resume_supported": checkpoint.get("resume_supported", True),
         "checkpoint_file": CHECKPOINT_NAME,
         "unique_videos_global": len(checkpoint["seen_video_ids"]),
         "credit_state": checkpoint["credit_state"],
@@ -264,8 +357,7 @@ def main() -> None:
     if target_root.exists():
         if not args.overwrite:
             raise SystemExit(
-                f"Diretório de destino já existe: {target_root}. "
-                "Use --overwrite para sobrescrever."
+                f"Diretório de destino já existe: {target_root}. Use --overwrite para sobrescrever."
             )
         shutil.rmtree(target_root)
 
@@ -275,15 +367,17 @@ def main() -> None:
         run_id=args.target,
         checkpoints=checkpoints,
         keep_credits=args.keep_credits,
+        disjoint_shards=args.disjoint_shards,
     )
 
-    copied = skipped = manifest_lines = 0
+    copied = skipped = manifest_lines = sightings_lines = 0
     if not args.skip_data_copy:
         for root in source_roots:
             c, s = copy_endpoint_data(root, target_root)
             copied += c
             skipped += s
         manifest_lines = merge_manifests(source_roots, target_root)
+        sightings_lines = merge_cluster_sightings(source_roots, target_root)
 
     atomic_write_json(target_root / CHECKPOINT_NAME, merged_checkpoint)
     atomic_write_json(
@@ -305,21 +399,24 @@ def main() -> None:
     if not args.skip_data_copy:
         print(f"  arquivos copiados:    {copied}  (ignorados/duplicados: {skipped})")
         print(f"  entradas manifest:    {manifest_lines}")
+        if sightings_lines:
+            print(f"  cluster sightings:    {sightings_lines}")
 
-    terms_file = merged_checkpoint["config"]["terms_file"]
-    search_pages = merged_checkpoint["config"]["search_pages"]
-    region_code = merged_checkpoint["config"]["region_code"]
+    if merged_checkpoint.get("resume_supported", True):
+        terms_file = merged_checkpoint["config"]["terms_file"]
+        search_pages = merged_checkpoint["config"]["search_pages"]
+        region_code = merged_checkpoint["config"]["region_code"]
 
-    print()
-    print("Para retomar a coleta a partir da run unificada:")
-    print(
-        "  uv run python scripts/collect_videos_from_terms_resumable.py \\\n"
-        f"      --terms-file {terms_file} \\\n"
-        f"      --run-id {args.target} \\\n"
-        f"      --storage-root {args.storage_root} \\\n"
-        f"      --search-pages {search_pages} \\\n"
-        f"      --region-code {region_code}"
-    )
+        print()
+        print("Para retomar a coleta a partir da run unificada:")
+        print(
+            "  uv run python scripts/collect_videos_from_terms_resumable.py \\\n"
+            f"      --terms-file {terms_file} \\\n"
+            f"      --run-id {args.target} \\\n"
+            f"      --storage-root {args.storage_root} \\\n"
+            f"      --search-pages {search_pages} \\\n"
+            f"      --region-code {region_code}"
+        )
 
 
 if __name__ == "__main__":
