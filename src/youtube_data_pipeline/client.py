@@ -35,6 +35,8 @@ class YouTubeDataClient:
     error_mode: str = "best_effort"
     persist_errors: bool = True
     count_failed_requests: bool = True
+    failed_request_credit_cost: int | None = None
+    allow_endpoints: frozenset[str] | None = None
     retry_policy: RetryPolicy = field(default_factory=RetryPolicy)
     # Concorrência: o transporte httplib2 do googleapiclient NÃO é thread-safe — um
     # único Http compartilhado entre threads corrompe o heap (SIGABRT). Cada thread
@@ -74,13 +76,23 @@ class YouTubeDataClient:
             run_id=run_id,
             compress=config.compress_responses,
         )
+        credit_monitor = CreditMonitor(
+            search_credit_limit=config.search_credit_limit,
+            general_credit_limit=config.general_credit_limit,
+            per_endpoint_call_limits=dict(config.per_endpoint_call_limits),
+        )
         return cls(
             service=service,
             storage=storage,
+            credit_monitor=credit_monitor,
             run_id=run_id,
             error_mode=config.error_mode,
             persist_errors=config.persist_errors,
             count_failed_requests=config.count_failed_requests,
+            failed_request_credit_cost=config.failed_request_credit_cost,
+            allow_endpoints=(
+                frozenset(config.allow_endpoints) if config.allow_endpoints is not None else None
+            ),
             retry_policy=config.retry_policy,
         )
 
@@ -95,7 +107,15 @@ class YouTubeDataClient:
         max_pages: int = 1,
         origin: str | None = None,
         credit_limit: int | None = None,
+        search_credit_limit: int | None = None,
+        general_credit_limit: int | None = None,
+        per_endpoint_call_limits: Mapping[str, int] | None = None,
     ) -> dict[str, Any]:
+        if self.allow_endpoints is not None and endpoint not in self.allow_endpoints:
+            raise ValueError(
+                f"Endpoint '{endpoint}' bloqueado pela política allow_endpoints "
+                f"(permitidos: {sorted(self.allow_endpoints)})"
+            )
         if endpoint not in self.endpoints:
             raise KeyError(f"Endpoint '{endpoint}' não está registrado")
 
@@ -131,12 +151,18 @@ class YouTubeDataClient:
             attempt = 0
             has_next_page = False
             while True:
-                if credit_limit is not None:
-                    projected = self.credit_monitor.total_spent + definition.base_credit_cost
-                    if projected > credit_limit:
-                        limit_reached = True
-                        stopped_reason = "credit_limit"
-                        break
+                allowance_reason = self.credit_monitor.check_allowance(
+                    endpoint,
+                    definition.base_credit_cost,
+                    credit_limit=credit_limit,
+                    search_credit_limit=search_credit_limit,
+                    general_credit_limit=general_credit_limit,
+                    per_endpoint_call_limits=per_endpoint_call_limits,
+                )
+                if allowance_reason is not None:
+                    limit_reached = True
+                    stopped_reason = allowance_reason
+                    break
                 attempt += 1
                 total_attempts += 1
                 with self._seq_lock:
@@ -200,15 +226,19 @@ class YouTubeDataClient:
                     if not isinstance(exc, HttpError):
                         raise
 
+                    failed_cost = (
+                        self.failed_request_credit_cost
+                        if self.failed_request_credit_cost is not None
+                        else definition.base_credit_cost
+                    )
                     if self.count_failed_requests:
-                        credit_state = self.credit_monitor.register(
-                            endpoint, definition.base_credit_cost
-                        )
+                        credit_state = self.credit_monitor.register(endpoint, failed_cost)
                     else:
                         # Sem cobrar o request falho (não consome cota), mas credit_state
                         # precisa estar ligado: o logger/manifest abaixo o usam mesmo quando
                         # o erro ocorre na 1ª página (nenhum sucesso prévio o ligou).
                         credit_state = self.credit_monitor.snapshot()
+                        failed_cost = 0
                     payload_dict = parse_error_content(exc.content)
                     status, reason, message, domain, location, location_type, raw_errors = (
                         extract_error_details(payload_dict)
@@ -238,7 +268,9 @@ class YouTubeDataClient:
                         "youtube_api_error",
                         request_id=request_id,
                         origin_field=origin_field,
-                        cost=definition.base_credit_cost,
+                        cost=failed_cost
+                        if self.count_failed_requests
+                        else definition.base_credit_cost,
                         cumulative_credits=credit_state["total_spent"],
                         per_endpoint=credit_state["per_endpoint"],
                         **error_payload,
@@ -298,7 +330,11 @@ class YouTubeDataClient:
                                 "page": page_idx,
                                 "file": error_meta["relative_path"],
                                 "timestamp": error_meta["timestamp"],
-                                "cost": definition.base_credit_cost,
+                                "cost": (
+                                    failed_cost
+                                    if self.count_failed_requests
+                                    else definition.base_credit_cost
+                                ),
                                 "cumulative_credits": credit_state["total_spent"],
                                 "per_endpoint": credit_state["per_endpoint"],
                                 "error_status": error_info.status,
@@ -327,7 +363,7 @@ class YouTubeDataClient:
                                 "attempt_count": total_attempts,
                                 "retry_count": total_retries,
                             },
-                        )
+                        ) from exc
                     break
 
             if limit_reached or stopped_reason:
@@ -390,10 +426,12 @@ class YouTubeDataClient:
             "q",
             "videoId",
             "parentId",
+            "playlistId",
             "id",
             "forHandle",
             "forUsername",
             "allThreadsRelatedToChannelId",
+            "regionCode",
         )
         for key in candidates:
             if key not in params:

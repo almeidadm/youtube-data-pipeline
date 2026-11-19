@@ -96,6 +96,11 @@ _SKIP_REASONS: dict[str, set[str]] = {
     "captions.list": {"captionNotFound", "videoNotFound"},
     "activities.list": {"channelNotFound", "homeChannelNotFound"},
     "channels.list": {"channelNotFound", "categoryNotFound"},
+    "playlistItems.list": {
+        "playlistNotFound",
+        "playlistItemsNotAccessible",
+        "videoNotFound",
+    },
 }
 
 _STOP_REASONS: set[str] = {
