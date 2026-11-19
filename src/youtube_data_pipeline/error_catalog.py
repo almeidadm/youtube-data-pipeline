@@ -234,6 +234,24 @@ ERROR_CATALOG: dict[str, dict[str, dict[str, Any]]] = {
             ),
         },
     },
+    "playlistItems.list": {
+        "playlistItemsNotAccessible": {
+            "status": 403,
+            "reason": "playlistItemsNotAccessible",
+            "description": (
+                "A solicitação não está autorizada corretamente para recuperar a playlist "
+                "especificada."
+            ),
+        },
+        "playlistNotFound": {
+            "status": 404,
+            "reason": "playlistNotFound",
+            "description": (
+                "Não foi possível encontrar o canal ou a playlist identificada pelo parâmetro "
+                "playlistId da solicitação."
+            ),
+        },
+    },
 }
 
 

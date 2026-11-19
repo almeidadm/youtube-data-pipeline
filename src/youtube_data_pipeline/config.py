@@ -1,12 +1,50 @@
+from __future__ import annotations
+
 import hashlib
+import os
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
+from .credits import (
+    YRP_GENERAL_CREDIT_LIMIT,
+    YRP_SEARCH_CREDIT_LIMIT,
+)
 from .errors import RetryPolicy
+
+YRP_ALLOWED_ENDPOINTS: frozenset[str] = frozenset(
+    {
+        "search",
+        "videos",
+        "channels",
+        "playlistItems",
+        "commentThreads",
+        "comments",
+        "videoCategories",
+    }
+)
+
+
+def resolve_api_key(api_key: str | None = None) -> str:
+    """Resolve API key from explicit value, YOUTUBE_API_KEY, or YOUTUBE_YRP_API_KEY.
+
+    Always points to a single institutional Google Cloud Project (zero key rotation).
+    """
+    if api_key and api_key.strip():
+        return api_key.strip()
+    env_primary = os.getenv("YOUTUBE_API_KEY")
+    if env_primary and env_primary.strip():
+        return env_primary.strip()
+    env_yrp = os.getenv("YOUTUBE_YRP_API_KEY")
+    if env_yrp and env_yrp.strip():
+        return env_yrp.strip()
+    return ""
+
 
 @dataclass(slots=True)
 class YouTubeDataConfig:
-    api_key: str
+    api_key: str = ""
     storage_root: str | Path = "./data/raw"
     discovery_cache: bool = False
     # True (default): usa o discovery doc ESTÁTICO embutido na googleapiclient —
@@ -20,7 +58,47 @@ class YouTubeDataConfig:
     error_mode: str = "best_effort"
     persist_errors: bool = True
     count_failed_requests: bool = True
+    failed_request_credit_cost: int | None = None
+    allow_endpoints: frozenset[str] | None = None
+    search_credit_limit: int | None = None
+    general_credit_limit: int | None = None
+    per_endpoint_call_limits: dict[str, int] = field(default_factory=dict)
+    yrp_mode: bool = False
     retry_policy: RetryPolicy = field(default_factory=RetryPolicy)
+
+    def __post_init__(self) -> None:
+        if not self.api_key:
+            self.api_key = resolve_api_key()
+        if self.allow_endpoints is not None and not isinstance(self.allow_endpoints, frozenset):
+            self.allow_endpoints = frozenset(self.allow_endpoints)
+        if self.yrp_mode:
+            if self.allow_endpoints is None:
+                self.allow_endpoints = YRP_ALLOWED_ENDPOINTS
+            if self.failed_request_credit_cost is None:
+                self.failed_request_credit_cost = 1
+            if self.search_credit_limit is None:
+                self.search_credit_limit = YRP_SEARCH_CREDIT_LIMIT
+            if self.general_credit_limit is None:
+                self.general_credit_limit = YRP_GENERAL_CREDIT_LIMIT
+
+    @classmethod
+    def for_yrp(
+        cls,
+        api_key: str | None = None,
+        *,
+        allow_endpoints: Iterable[str] | None = None,
+        **kwargs: Any,
+    ) -> YouTubeDataConfig:
+        """Create a YouTubeDataConfig pre-configured for the YRP 6-month profile."""
+        allowed = (
+            frozenset(allow_endpoints) if allow_endpoints is not None else YRP_ALLOWED_ENDPOINTS
+        )
+        return cls(
+            api_key=resolve_api_key(api_key),
+            allow_endpoints=allowed,
+            yrp_mode=True,
+            **kwargs,
+        )
 
     def normalized_storage_root(self) -> Path:
         return Path(self.storage_root).expanduser().resolve()

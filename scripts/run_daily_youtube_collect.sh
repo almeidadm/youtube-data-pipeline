@@ -9,8 +9,9 @@
 
 set -u
 
-readonly REPO_DIR="/home/diacrono/Documentos/repositorios/youtube-api"
-readonly FACTCHECK_DAILY_DIR="/home/diacrono/Documentos/repositorios/fact-checking-scrape/data/daily"
+readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly REPO_DIR="${YOUTUBE_API_REPO_DIR:-$(dirname "$SCRIPT_DIR")}"
+readonly FACTCHECK_DAILY_DIR="${FACTCHECK_DAILY_DIR:-$HOME/Documentos/repositorios/fact-checking-scrape/data/daily}"
 readonly LOG_FILE="$REPO_DIR/logs/daily_youtube_collect.log"
 readonly PIDFILE="/tmp/youtube-daily-collect.pid"
 

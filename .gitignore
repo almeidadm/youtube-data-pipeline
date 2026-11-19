@@ -207,6 +207,8 @@ marimo/_lsp/
 __marimo__/
 
 # Dev Preference
+# Exception: notebooks/eda_news_query_preparation.ipynb is tracked (git add -f)
+# because tests/test_query_preparation.py validates its structure.
 data/
 notebooks/
 *.ipynb

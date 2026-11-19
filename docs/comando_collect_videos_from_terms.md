@@ -1,5 +1,10 @@
 # Comando: collect_videos_from_terms_resumable.py
 
+> **Nota de 2026-11-06 — participação no Researcher Program encerrada.** O valor `110000` em
+> `--credit-limit` é **histórico**: correspondia à concessão de 110.000 unidades/dia, vigente de
+> 2026-04-05 a 2026-11-06. Com o encerramento, a chave voltou ao padrão de **10.000 unidades/dia**;
+> reduzir o limite antes de executar em produção.
+
 Referência rápida para reconstruir e executar o comando de coleta de vídeos do YouTube a partir de uma lista de termos, com retomada (resumable) por `--run-id`.
 
 Script fonte: `scripts/collect_videos_from_terms_resumable.py`
@@ -36,17 +41,20 @@ uv run python scripts/collect_videos_from_terms_resumable.py \
 
 | Flag | Obrigatória | Default | Significado |
 |------|-------------|---------|-------------|
-| `--terms-file` | sim | — | Arquivo UTF-8 com um termo por linha. |
+| `--terms-file` | sim | — | Arquivo UTF-8 (`.txt` com um termo por linha ou `.jsonl` estruturado por cluster). |
 | `--api-key` | não* | lê `YOUTUBE_API_KEY` | API key do YouTube Data API v3. *Obrigatória se a variável de ambiente não estiver definida. |
 | `--run-id` | não | UUID aleatório | Identificador da execução. **Reutilize o mesmo para retomar.** |
 | `--storage-root` | não | `./data/raw` | Diretório base para respostas/checkpoint/logs. |
 | `--log-path` | não | `youtube_data_pipeline.jsonl` | Nome do arquivo JSONL de logs dentro do diretório da run. |
 | `--compress-responses` | não | desligado | Se presente, salva respostas como `.json.gz`. |
 | `--region-code` | não | `BR` | Region code passado ao `search` e `videos`. |
-| `--search-pages` | não | `5` | Páginas máximas de `search.list` por termo (≥ 1). |
+| `--relevance-language` | não | `pt` (em `.jsonl`) | Idioma de relevância (`relevanceLanguage`) enviado ao `search.list`. |
+| `--videos-part` | não | `snippet,contentDetails,statistics,status` (em `.jsonl`) | Campo `part` enviado ao `videos.list`. |
+| `--dedupe-video-details` | não | ligado (em `.jsonl`) | Pula `videos.list` para `videoId`s já detalhados em clusters anteriores da mesma run. |
+| `--search-pages` | não | `3` | Páginas máximas de `search.list` por termo/cluster (≥ 1). |
 | `--search-max-results` | não | `50` | Itens por página em `search.list` (1–50). |
-| `--credit-limit` | não | `110000` | Limite total de créditos da execução. |
-| `--max-terms` | não | (todos) | Processa apenas os N primeiros termos (útil para testes). |
+| `--credit-limit` | não | `10000` | Limite total de créditos da execução (padrão pós-Researcher Program). |
+| `--max-terms` | não | (todos) | Processa apenas os N primeiros termos/clusters (útil para testes). |
 | `--summary-name` | não | `terms_collection_summary.json` | Nome do arquivo de resumo público. |
 
 > O comando canônico **não usa** `--storage-root`, `--log-path`, `--compress-responses`, `--search-max-results`, `--max-terms` nem `--summary-name`, então todos caem no default.
@@ -236,8 +244,55 @@ Após executar, `{storage_root}/runs/{run_id}/` contém:
 
 ---
 
+## Fluxo de Fotografia Congelada (`seed_20261107.csv` -> Partições Disjuntas `.jsonl`)
+
+Para a coleta de fotografia congelada integrada à triagem LLM (`seed_20261107.csv`), com até 3 páginas fixas por cluster, janela temporal fechada `[-45d, +90d]` e particionamento estático disjunto entre $K$ contas/operadores:
+
+### 1. Gerar as partições estáticas disjuntas (`prepare_frozen_seed_shards.py`)
+
+```bash
+uv run python scripts/prepare_frozen_seed_shards.py \
+  --seed-csv ~/Documentos/repositorios/fact-checking-scrape/data/economia/census/seed_20261107.csv \
+  --output-dir ./data/processed/queries/frozen_20261107 \
+  --prefix econ_snapshot_20261107 \
+  --num-shards 3 \
+  --shard-strategy interleaved \
+  --search-pages 3 \
+  --credit-limit 9900 \
+  --exclude-monitoring-db ~/Documentos/repositorios/schedule_fake_news_monitoring/data/monitoring.db
+```
+
+### 2. Executar cada partição (1 `--run-id` fixo por partição, retomável diariamente)
+
+```bash
+uv run python scripts/collect_videos_from_terms_resumable.py \
+  --terms-file ./data/processed/queries/frozen_20261107/econ_snapshot_20261107_s01of03.jsonl \
+  --run-id econ_snapshot_20261107_s01of03 \
+  --search-pages 3 \
+  --credit-limit 9900 \
+  --region-code BR \
+  --relevance-language pt
+```
+
+> Para retomar a mesma partição no dia seguinte (após renovação da cota de 10.000 unidades/dia), incremente `--credit-limit` (ex.: `19800` no dia 2, `29700` no dia 3) mantendo o mesmo `--run-id`.
+
+### 3. Unificar as partições disjuntas concluídas (`unify_runs.py --disjoint-shards`)
+
+```bash
+uv run python scripts/unify_runs.py \
+  --disjoint-shards \
+  --keep-credits \
+  --source ./data/raw/runs/econ_snapshot_20261107_s01of03 \
+  --source ./data/raw/runs/econ_snapshot_20261107_s02of03 \
+  --source ./data/raw/runs/econ_snapshot_20261107_s03of03 \
+  --target econ_snapshot_20261107_unified
+```
+
+---
+
 ## Referências rápidas
 
 - YouTube Data API v3: https://developers.google.com/youtube/v3
 - Gerador de termos: `scripts/generate_queries_from_factchecks.py`
+- Gerador de partições congeladas: `scripts/prepare_frozen_seed_shards.py`
 - Metodologia do projeto: `docs/metodologia_busca_youtube.md`
